@@ -218,7 +218,11 @@ impl AiService {
             Err(e) => ("error", Some(e.to_string())),
         };
         let err2 = err.clone();
-        self.db.call(move |c| repo::set_sync_status(c, id, status, err2.as_deref())).await?;
+        // A missing credential is not a sync outcome: keep the card's status
+        // (e.g. "connected" from the API-key test) instead of "unsupported".
+        if !matches!(result, Err(AppError::NotConfigured(_))) {
+            self.db.call(move |c| repo::set_sync_status(c, id, status, err2.as_deref())).await?;
+        }
         if status == "error" {
             let auth = matches!(result, Err(AppError::Auth(_)));
             self.alerts.provider_error(kind.id(), err.as_deref().unwrap_or(""), auth).await;
@@ -425,6 +429,9 @@ impl AiService {
                 let caps = adapter(kind).capabilities();
                 if !(caps.usage_api || caps.cost_api || caps.account_info) {
                     continue; // nothing to poll; telemetry/import only
+                }
+                if caps.requires_admin_key_for_usage && !keychain::exists(kind.id(), KeyKind::Admin) {
+                    continue; // API key only: telemetry works, official usage needs an admin key
                 }
                 let due = p.last_sync_at.is_none_or(|t| now - t >= p.sync_interval_minutes.max(5) * 60_000);
                 if due {
