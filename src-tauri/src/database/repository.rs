@@ -84,6 +84,21 @@ pub fn set_sync_status(c: &Connection, id: &str, status: &str, error: Option<&st
     Ok(())
 }
 
+/// Record a connection-test outcome without pretending a sync happened.
+pub fn set_status(c: &Connection, id: &str, status: &str, error: Option<&str>) -> AppResult<()> {
+    c.execute("UPDATE ai_providers SET last_sync_status = ?2, last_error = ?3 WHERE id = ?1", params![id, status, error])?;
+    Ok(())
+}
+
+/// Enable a provider when its first credential is saved (custom needs a base URL first).
+pub fn enable_on_key_saved(c: &Connection, id: &str) -> AppResult<bool> {
+    let n = c.execute(
+        "UPDATE ai_providers SET enabled = 1 WHERE id = ?1 AND enabled = 0 AND (id <> 'custom' OR base_url IS NOT NULL)",
+        params![id],
+    )?;
+    Ok(n > 0)
+}
+
 pub fn set_account(c: &Connection, id: &str, account: &AccountInfo) -> AppResult<()> {
     c.execute("UPDATE ai_providers SET account_json = ?2 WHERE id = ?1", params![id, serde_json::to_string(account)?])?;
     Ok(())
@@ -475,6 +490,26 @@ mod tests {
             r.threshold = 75.0;
             update_alert_rule(c, &r)?;
             assert_eq!(list_alert_rules(c)?.into_iter().find(|r| r.id == "cpu_high").unwrap().threshold, 75.0);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn key_save_enables_provider_and_test_status_keeps_sync_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("t.db")).unwrap();
+        db.call_sync(|c| {
+            assert!(enable_on_key_saved(c, "openai")?);
+            assert!(!enable_on_key_saved(c, "openai")?, "already enabled");
+            // Custom stays disabled until it has a base URL.
+            assert!(!enable_on_key_saved(c, "custom")?);
+            let p = get_provider(c, "openai")?.unwrap();
+            assert!(p.enabled);
+            set_status(c, "openai", "error", Some("Usage API: 401"))?;
+            let p = get_provider(c, "openai")?.unwrap();
+            assert_eq!(p.last_sync_status.as_deref(), Some("error"));
+            assert_eq!(p.last_sync_at, None, "a connection test is not a sync");
             Ok(())
         })
         .unwrap();

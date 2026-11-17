@@ -55,17 +55,71 @@ pub async fn save_provider_config(app: AppHandle, state: State<'_, AppState>, co
 }
 
 #[tauri::command]
-pub async fn set_provider_key(app: AppHandle, provider: String, kind: String, secret: String) -> AppResult<()> {
+pub async fn set_provider_key(app: AppHandle, state: State<'_, AppState>, provider: String, kind: String, secret: String) -> AppResult<()> {
     let p = ProviderKind::parse(&provider)?;
     let k = KeyKind::parse(&kind)?;
     let secret = secret.trim().to_string();
     if secret.len() < 8 || secret.len() > 512 || secret.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(AppError::Invalid("that does not look like an API key".into()));
     }
+    check_key_kind(p, k, &secret)?;
     tokio::task::spawn_blocking(move || keychain::set(p.id(), k, &secret)).await??;
     tracing::info!(provider = p.id(), kind = k.as_str(), "credential saved to Keychain");
+    let id = p.id();
+    if state.db.call(move |c| repo::enable_on_key_saved(c, id)).await? {
+        tracing::info!(provider = id, "provider enabled after first credential");
+    }
     let _ = app.emit("ai://providers-changed", p.id());
+    // Sync right away instead of waiting for the next scheduled run, when the
+    // saved credentials are enough to reach the provider's usage data.
+    let caps = crate::ai::adapter(p).capabilities();
+    let syncable = caps.usage_api || caps.cost_api || caps.account_info;
+    let has_needed_key = !caps.requires_admin_key_for_usage || k == KeyKind::Admin || keychain::exists(id, KeyKind::Admin);
+    let enabled = state.db.call(move |c| repo::get_provider(c, id)).await?.is_some_and(|r| r.enabled);
+    if syncable && has_needed_key && enabled {
+        let ai = state.ai.clone();
+        tauri::async_runtime::spawn(async move {
+            match ai.sync_provider(p).await {
+                Ok(m) => tracing::info!(provider = id, "sync after key save: {m}"),
+                Err(e) => tracing::warn!(provider = id, "sync after key save failed: {e}"),
+            }
+        });
+    }
     Ok(())
+}
+
+/// Catch the common mix-up of pasting a key into the wrong field.
+fn check_key_kind(p: ProviderKind, k: KeyKind, secret: &str) -> AppResult<()> {
+    let admin_like = match p {
+        ProviderKind::Openai => Some(secret.starts_with("sk-admin-")),
+        ProviderKind::Anthropic => Some(secret.starts_with("sk-ant-admin")),
+        _ => None,
+    };
+    match (admin_like, k) {
+        (Some(true), KeyKind::Api) => Err(AppError::Invalid(
+            "this is an Admin key — paste it into the Admin key field; the API key field needs a regular key".into(),
+        )),
+        (Some(false), KeyKind::Admin) => Err(AppError::Invalid(match p {
+            ProviderKind::Openai => "an OpenAI Admin key starts with sk-admin- (create one at platform.openai.com/settings/organization/admin-keys)".into(),
+            _ => "an Anthropic Admin key starts with sk-ant-admin (create one in Console → Settings → Admin keys)".into(),
+        })),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod key_kind_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_keys_in_the_wrong_field() {
+        assert!(check_key_kind(ProviderKind::Openai, KeyKind::Api, "sk-admin-abcdefgh").is_err());
+        assert!(check_key_kind(ProviderKind::Openai, KeyKind::Admin, "sk-proj-abcdefgh").is_err());
+        assert!(check_key_kind(ProviderKind::Openai, KeyKind::Api, "sk-proj-abcdefgh").is_ok());
+        assert!(check_key_kind(ProviderKind::Openai, KeyKind::Admin, "sk-admin-abcdefgh").is_ok());
+        assert!(check_key_kind(ProviderKind::Anthropic, KeyKind::Api, "sk-ant-admin01-x").is_err());
+        assert!(check_key_kind(ProviderKind::Groq, KeyKind::Api, "gsk_abcdefgh").is_ok());
+    }
 }
 
 #[tauri::command]

@@ -153,9 +153,9 @@ Retention defaults: system metrics 7 days (10 s resolution), AI records forever,
 * **Gemini, Groq, DeepSeek** have no public usage API → telemetry/import only. Anthropic/OpenAI official usage needs **admin** keys.
 * OpenRouter credit data is stored per UTC day from the "used today" figure; the last minutes before UTC midnight may be missed if no sync runs then.
 * Provider buckets are **UTC days**; filters use local time and include a bucket when its midpoint falls inside the range.
-* Not signed or notarized; the Keychain may ask once for access when a different build (e.g. dev vs release) reads a key saved by another build.
+* Not signed or notarized. After installing a new build, macOS no longer lets it read keys saved by the previous build: re-enter your keys in Settings → AI Providers (or choose *Allow* when asked).
 * History rows are flushed every 60 s; if the process is killed (not quit), up to a minute of history is lost.
-* Only a dark theme is designed; Vietnamese translation covers navigation and key labels.
+* Only a dark theme is designed; Vietnamese translation covers navigation, the AI Usage page and key labels.
 
 ## Project layout
 

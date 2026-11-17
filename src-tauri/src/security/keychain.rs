@@ -42,9 +42,42 @@ mod imp {
     // errSecItemNotFound
     const NOT_FOUND: i32 = -25300;
 
+    // errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed
+    const DENIED: [i32; 3] = [-128, -25293, -25308];
+
+    fn denied_hint(code: i32) -> String {
+        if DENIED.contains(&code) {
+            format!(
+                "Keychain access was denied (OSStatus {code}). Unsigned builds lose access to keys saved by an earlier build — \
+                 re-enter the key in Settings → AI Providers, or choose Allow when macOS asks."
+            )
+        } else {
+            format!("could not read credential (OSStatus {code})")
+        }
+    }
+
     pub fn set(provider: &str, kind: KeyKind, secret: &str) -> AppResult<()> {
-        set_generic_password(SERVICE, &account(provider, kind), secret.as_bytes())
+        // Replace rather than update: a new item's access list trusts the
+        // running build, so later reads do not prompt.
+        let acct = account(provider, kind);
+        let _ = delete_generic_password(SERVICE, &acct);
+        set_generic_password(SERVICE, &acct, secret.as_bytes())
             .map_err(|e| AppError::Keychain(format!("could not save credential (OSStatus {})", e.code())))
+    }
+
+    /// Whether an item exists, without reading (decrypting) the secret, so
+    /// listing providers never triggers a Keychain prompt.
+    pub fn exists(provider: &str, kind: KeyKind) -> bool {
+        use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+        ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(SERVICE)
+            .account(&account(provider, kind))
+            .load_attributes(true)
+            .limit(Limit::Max(1))
+            .search()
+            .map(|r| !r.is_empty())
+            .unwrap_or(false)
     }
 
     pub fn get(provider: &str, kind: KeyKind) -> AppResult<Option<String>> {
@@ -53,7 +86,7 @@ mod imp {
                 .map(Some)
                 .map_err(|_| AppError::Keychain("stored credential is not valid UTF-8".into())),
             Err(e) if e.code() == NOT_FOUND => Ok(None),
-            Err(e) => Err(AppError::Keychain(format!("could not read credential (OSStatus {})", e.code()))),
+            Err(e) => Err(AppError::Keychain(denied_hint(e.code()))),
         }
     }
 
@@ -78,13 +111,12 @@ mod imp {
     pub fn delete(_: &str, _: KeyKind) -> AppResult<()> {
         Ok(())
     }
+    pub fn exists(_: &str, _: KeyKind) -> bool {
+        false
+    }
 }
 
-pub use imp::{delete, get, set};
-
-pub fn exists(provider: &str, kind: KeyKind) -> bool {
-    matches!(get(provider, kind), Ok(Some(_)))
-}
+pub use imp::{delete, exists, get, set};
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
@@ -97,9 +129,15 @@ mod tests {
     #[ignore]
     fn keychain_roundtrip() {
         let p = "mac-observer-selftest";
+        assert!(!exists(p, KeyKind::Api));
         set(p, KeyKind::Api, "test-value-123").unwrap();
+        assert!(exists(p, KeyKind::Api));
         assert_eq!(get(p, KeyKind::Api).unwrap().as_deref(), Some("test-value-123"));
+        // Re-saving replaces the item.
+        set(p, KeyKind::Api, "test-value-456").unwrap();
+        assert_eq!(get(p, KeyKind::Api).unwrap().as_deref(), Some("test-value-456"));
         delete(p, KeyKind::Api).unwrap();
+        assert!(!exists(p, KeyKind::Api));
         assert_eq!(get(p, KeyKind::Api).unwrap(), None);
     }
 }

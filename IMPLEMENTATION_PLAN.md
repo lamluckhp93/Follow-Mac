@@ -2,7 +2,7 @@
 
 Status legend: `[x]` done **and verified** · `[~]` implemented, not verified end-to-end · `[!]` limited (reason given) · `[ ]` todo
 
-Last updated: 2026-11-17.
+Last updated: 2026-11-17 (v0.1.1).
 
 ## Environment (surveyed 2026-11-17)
 
@@ -52,7 +52,7 @@ Last updated: 2026-11-17.
 
 ### Phase 3 — AI providers
 - [x] Provider adapter trait + registry
-- [~] OpenAI (connection test, Usage + Costs APIs with admin key): parsers unit-tested; **no live key tested**
+- [x] OpenAI: verified live 2026-11-17 with real keys (`tests/live_openai.rs`, opt-in): API key → 96 models; admin key → Usage and Costs APIs HTTP 200, sync runs end-to-end (the test organisation had no usage in the last 30 days, so record parsing of live non-empty pages is still only covered by unit tests). Key-field mix-ups are rejected on save; restricted keys without Models: Read are accepted with a hint; saving a key enables the provider and syncs immediately
 - [~] Anthropic (Usage & Cost Analytics API + legacy fallback): parsers tested against the documented example; **no live key tested**
 - [~] Gemini (connection test, telemetry): **no live key tested**
 - [~] OpenRouter (key credits), DeepSeek (balance), Groq, Custom: parsers tested; **no live key tested**
@@ -84,7 +84,8 @@ Last updated: 2026-11-17.
 - [x] Documentation (README, ARCHITECTURE)
 
 ## Open items
-- Live verification with real API keys for each provider (requires the user's keys).
+- Live verification with real API keys for Anthropic, Gemini, OpenRouter, DeepSeek, Groq, Custom (OpenAI done).
+- Unsigned builds: each new build loses Keychain access to keys saved by the previous one (re-enter keys after updating). A stable Developer ID signature fixes this.
 - Visual check of the menu bar item on screen.
 - Code signing / notarization (needs an Apple Developer ID).
 - One `system_metrics` row recorded before the rate fix holds an impossible disk-read value (≈124 GB/s); it ages out with the 7-day retention or can be deleted manually.

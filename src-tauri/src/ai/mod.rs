@@ -188,9 +188,15 @@ impl AiService {
         let ctx = self.context(kind).await?;
         let result = adapter(kind).test_connection(&ctx).await;
         if let Ok(r) = &result {
-            let (status, err) = if r.ok { ("ok", None) } else { ("error", Some(r.message.clone())) };
+            // A working API key does not mean usage can be synced: surface a
+            // failing usage/admin check on the card instead of "connected".
+            let (status, err) = match (&r.usage_api, r.ok) {
+                (_, false) => ("error", Some(r.message.clone())),
+                (Some(u), true) if !u.ok => ("error", Some(format!("Usage API: {}", u.message))),
+                _ => ("ok", None),
+            };
             let id = kind.id();
-            self.db.call(move |c| repo::set_sync_status(c, id, status, err.as_deref())).await?;
+            self.db.call(move |c| repo::set_status(c, id, status, err.as_deref())).await?;
         }
         result
     }

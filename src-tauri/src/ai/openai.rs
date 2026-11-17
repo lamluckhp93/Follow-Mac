@@ -74,6 +74,17 @@ pub fn parse_cost_page(v: &Value) -> Vec<CostRecord> {
     out
 }
 
+/// Usage/cost endpoints only accept organization Admin keys; explain a 401/403.
+fn admin_hint(e: AppError) -> AppError {
+    match e {
+        AppError::Auth(m) => AppError::Auth(format!(
+            "{m} — the Usage API needs an organization Admin key (starts with sk-admin-), created by an org owner at \
+             platform.openai.com/settings/organization/admin-keys. Project or personal keys are rejected."
+        )),
+        other => other,
+    }
+}
+
 async fn paged(
     ctx: &ProviderContext,
     path: &str,
@@ -133,6 +144,13 @@ impl ProviderAdapter for OpenAi {
                     models = models_from_openai_list(&v);
                     message = format!("API key valid · {} models available", models.len());
                 }
+                // A restricted key authenticates but may lack "Models: Read".
+                Err(AppError::Auth(m)) if m.contains("api.model.read") => {
+                    message = "Key accepted, but it is a restricted key without “Models: Read”, so the model list is \
+                               unavailable. Grant Models → Read (and Model capabilities → Write for test requests) on the key, \
+                               or use an unrestricted key."
+                        .into();
+                }
                 Err(e) => {
                     ok = false;
                     message = e.to_string();
@@ -155,7 +173,7 @@ impl ProviderAdapter for OpenAi {
                     .await
                     {
                         Ok(_) => UsageApiCheck { ok: true, message: "Usage API reachable with admin key".into() },
-                        Err(e) => UsageApiCheck { ok: false, message: e.to_string() },
+                        Err(e) => UsageApiCheck { ok: false, message: admin_hint(e).to_string() },
                     },
                 )
             }
@@ -182,7 +200,9 @@ impl ProviderAdapter for OpenAi {
         ];
         let mut q = common.clone();
         q.push(("group_by", "model".into()));
-        paged(ctx, "/v1/organization/usage/completions", q, |v| res.usage.extend(parse_usage_page(v))).await?;
+        paged(ctx, "/v1/organization/usage/completions", q, |v| res.usage.extend(parse_usage_page(v)))
+            .await
+            .map_err(admin_hint)?;
 
         let mut q = common;
         q.push(("group_by", "line_item".into()));

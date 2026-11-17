@@ -1,6 +1,6 @@
 [package]
 name = "mac-observer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Mac System & AI Usage Dashboard"
 authors = ["Mac Observer"]
 edition = "2021"
