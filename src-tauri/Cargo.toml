@@ -1,0 +1,60 @@
+[package]
+name = "mac-observer"
+version = "0.1.0"
+description = "Mac System & AI Usage Dashboard"
+authors = ["Mac Observer"]
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "mac_observer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-notification = "2.8"
+tauri-plugin-autostart = "2.7"
+tauri-plugin-window-state = "2.5"
+tauri-plugin-dialog = "2.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "fs"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "stream", "query"] }
+rusqlite = { version = "0.43", features = ["bundled", "backup"] }
+sysinfo = "0.40"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+uuid = { version = "1", features = ["v4"] }
+csv = "1.3"
+axum = "0.8"
+async-trait = "0.1"
+sha2 = "0.10"
+bytes = "1"
+libc = "0.2"
+url = "2"
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+io-kit-sys = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
